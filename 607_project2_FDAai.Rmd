@@ -1,0 +1,448 @@
+---
+title: "607_week5_discussion"
+author: "Fares A"
+date: "2024-02-25"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+# dataset#1 FDA Approval of AI Algorithms in Medicine data set.
+
+This is the wide table of the data set I have chosen:
+
+```{r, eval=FALSE, echo=FALSE}
+df <- read.csv("https://raw.githubusercontent.com/unsecuredAMRAP/607/main/AI-FDA_wide-table.csv")
+
+print(df)
+```
+
+Here it is in table format form the loaded data frame from the CSV file imported into R:
+
+```{r}
+library(kableExtra)
+df <- read.csv("https://raw.githubusercontent.com/unsecuredAMRAP/607/main/AI-FDA_wide-table.csv")
+
+df %>% 
+  kable("html") %>% 
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+------------------------------------------------------------------------
+
+## Project 2 starts here:
+
+**Tidying and transforming the data**
+
+The first step transformation I want to do: currently, the 4 rows are needed to become columns, and the columns need to become rows. The current columns of "artificial intelligence",	"machine learning",	"deep learning", "NA", and "Total"  are under the parent label of "Mention of AI in announcement". Similarly, the current columns of "CT",	"Ultrasound",	"ECG",	"MRI",	"Mammography",	and "Brain" are under the parent label of "Modality". Also similarly, the current columns of "Cardiology",	"Neurology",	"Radiology",	and "Other" are under the parent label of "Clinical Discipline".
+So considering the abbreviations of the following in ():
+
+- Mention of AI in announcement (MA)
+- Modality (M)
+- Clinical Discipline (CD)
+
+when transforming this wide into long format by switching columns to rows and rows to columns, the daughter column labels will be coupled with the parent column label to create the new row labels (for example "MA.machine_learning").
+
+```{r}
+library(tidyverse)
+library(dplyr)
+
+## Data Transformations
+
+# column names to include the parent label as a prefix
+new_col_names <- c("Type.of.FDA.approval", 
+                   "MA.artificial_intelligence", "MA.machine_learning", "MA.deep_learning", "MA.NA", "MA.Total", 
+                   "M.CT", "M.Ultrasound", "M.ECG", "M.MRI", "M.Mammography", "M.Brain", 
+                   "CD.Cardiology", "CD.Neurology", "CD.Radiology", "CD.Other")
+# change column names
+names(df) <- new_col_names
+
+# drop row 1 (old daughter column labels)
+df <- df[-1, ]
+
+# drop Total column and Total row to avoid confusion and clean up as a data set
+df1 <- df[ , -6]
+df1 <- df1[-4 , ]
+
+# Convert all but the first column to numeric
+df1[, -1] <- lapply(df1[, -1], function(x) as.numeric(as.character(x)))
+
+#--- --- ---
+
+# Transformation of the data from wide to long format
+df1_long <- pivot_longer(
+  data = df1,
+  cols = -Type.of.FDA.approval, # Exclude the identifier column
+  names_to = "Category", # This will hold the names of the current columns
+  values_to = "Count" # This will hold the counts
+)
+
+print(df1_long)
+```
+
+```{r}
+#General summary snapshot (not final but helpful)
+summary(df1)
+```
+
+**1- Descriptive analyses: FDA approvals within a specific clinical discipline**
+
+```{r}
+# counting FDA approvals within a specific clinical discipline
+total_approvals <- colSums(df1[,-1])
+total_approvals
+
+# mean number of approvals
+mean_approvals <- colMeans(df1[1:(nrow(df)-1), -1])
+mean_approvals
+summary_by_discipline <- lapply(df1[,-1], summary)
+summary_by_discipline
+
+proportions <- sweep(df1[,-1], 2, total_approvals, FUN = "/")
+proportions
+```
+
+
+**2- Association between AI technique and FDA approval type**
+```{r, warning=FALSE}
+## Data Transformations
+
+# a function to perform Chi-square tests on pairs of columns
+perform_chi_square <- function(index1, index2) {
+  # the contingency tables
+  contingency_table <- matrix(c(df1[, index1], df1[, index2]), nrow = 3, byrow = TRUE)
+   
+  # Chi-square test
+  test_result <- chisq.test(contingency_table)
+  
+  # p-value and the Chi-square statistic
+  return(c(p_value = test_result$p.value, chi_square = test_result$statistic))
+}
+
+# indices for the clinical disciplines
+discipline_indices <- c(12, 13, 14, 15)
+
+# the pairs of disciplines to compare
+index_pairs <- combn(discipline_indices, 2, simplify = FALSE)
+
+# Chi-square tests for all pairs and collect the results
+results <- setNames(object = lapply(index_pairs, function(indices) perform_chi_square(indices[1], indices[2])), 
+                    nm = lapply(index_pairs, function(indices) paste(names(df1)[indices], collapse = " vs. ")))
+
+# Convert the list of results to a data frame for presentation
+results_df <- do.call(rbind, results)
+results_df <- data.frame(Comparison = rownames(results_df), results_df)
+rownames(results_df) <- NULL
+
+print(results_df)
+```
+These results imply that the type of FDA approval a device receives may be dependent on the clinical discipline it is associated wit:
+
+- Cardiology vs. Neurology: The p-value (0.002) suggests a statistically significant difference in the distribution of FDA approval types between cardiology and neurology.
+- Cardiology vs. Radiology: The p-value (approx. 0) indicates a highly significant difference in FDA approval types between cardiology and radiology.
+- Cardiology vs. Other: The p-value (0.000017) points to a significant difference in FDA approval types between cardiology and other clinical disciplines.
+- Neurology vs. Radiology: The p-value (approx. 0) implies a significant difference in FDA approval types between neurology and radiology.
+- Neurology vs. Other: The p-value (0.00009) indicates a statistically significant difference in the distribution of FDA approval types between neurology and other clinical disciplines.
+- Radiology vs. Other: The p-value (approx. 0) suggests a highly significant difference in FDA approval types between radiology and other clinical disciplines.
+
+It is worth noting that Radiology had the most FDA approvals for AI algorithms (followed by cardiology), and that the 510 FDA approval was the most common across clinical disciplines.
+
+**3- Visualization**
+
+```{r}
+library(ggplot2)
+
+# bar plots for the FDA approvals across disciplines
+df_approvals <- data.frame(
+  Approval = rep(c("510(k)", "de novo", "PMA"), times = 4),
+  Discipline = rep(c("Cardiology", "Neurology", "Radiology", "Other"), each = 3),
+  Count = c(14, 2, 0, 4, 1, 0, 34, 4, 1, 12, 3, 1) # Use your actual counts here
+)
+ggplot(df_approvals, aes(x = Discipline, y = Count, fill = Approval)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  labs(title = "FDA Approval Counts by Clinical Discipline", x = "Clinical Discipline", y = "Count") +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Pastel1")
+
+# bar plot to summarize the chi-square analysis
+ggplot(results_df, aes(x = Comparison, y = chi_square.X.squared, fill = Comparison)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  labs(title = "Chi-Square Test Results for FDA Approvals Across Clinical Disciplines",
+       x = "Clinical Discipline Comparisons",
+       y = "Chi-Square Statistic") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_fill_brewer(palette = "Set2")
+
+# Heat map of the p values of the chi-square analysis
+ggplot(results_df, aes(x = Comparison, y = chi_square.X.squared, fill = -log10(p_value))) +
+  geom_tile() +
+  scale_fill_gradient(low = "blue", high = "red") +
+  labs(title = "Heatmap of P-Values for FDA Approvals Across Clinical Disciplines",
+       x = "Clinical Discipline 1",
+       y = "Clinical Discipline 2",
+       fill = "-Log10 P-Value") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# heat map for the FDA approvals across disciplines
+library(pheatmap)
+# Data Transformations
+# Converting the dataframe into a matrix format suitable for heatmap
+approval_matrix <- matrix(c(14, 2, 0, 4, 1, 0, 34, 4, 1, 12, 3, 1), nrow = 3, byrow = TRUE,
+                          dimnames = list(c("510(k)", "de novo", "PMA"), 
+                                          c("Cardiology", "Neurology", "Radiology", "Other")))
+pheatmap(approval_matrix, main = "Heatmap of FDA Approval Counts", 
+         color = colorRampPalette(c("blue", "yellow", "red"))(50))
+```
+
+
+==============================================================================
+
+# dataset#2 Airbnb in NYC 2019 data.
+
+Let's start by loading the data
+```{r}
+df_nyc <- read.csv("https://raw.githubusercontent.com/unsecuredAMRAP/607/main/AB_NYC_2019.csv")
+```
+
+The Blackboard post by Atta Boateng Sr noted that the aim is to see which area of NYC allows a person to rent an entire home or apartment for the least amount of money, as a surrogate for seeing which area "gives you the most bang for your buck".
+
+**Transformations.**
+
+So, as a first step in tidying and transforming this data set, I will limit the data set to the listings that are "entire home/apt".
+
+```{r}
+filtered_df_nyc <- df_nyc %>%
+  filter(room_type == "Entire home/apt")
+```
+
+Now I want to ease the data set and the subsequent work I will be doing on it by only keeping the columns that are relevant to my intended analysis.
+
+```{r}
+final_df_nyc <- filtered_df_nyc %>%
+  select(price, neighbourhood, neighbourhood_group)
+```
+
+Checking how many neighborhoods and neighborhood_groups there are in this data set
+```{r}
+unique_neighbourhoods <- n_distinct(final_df_nyc$neighbourhood)
+unique_neighbourhood_groups <- n_distinct(final_df_nyc$neighbourhood_group)
+
+unique_neighbourhoods
+unique_neighbourhood_groups
+```
+I have found (from checking normality later) that the data is right-skewed and has many extreme values (outliers). So I will transform the data a little further to reduce the outliers.
+
+```{r}
+# making sure that all price values are greater than zero
+if(any(final_df_nyc$price <= 0)) {
+  # add a constant to all values before taking the log
+  final_df_nyc$price <- final_df_nyc$price + 1
+}
+
+# applying the log transformation
+final_df_nyc$log_price <- log(final_df_nyc$price)
+```
+
+
+**Analysis.**
+
+Since there are 5 unique neighborhood_groups, let's go by that (as opposed to working with 216 different neighborhoods, which would make our work difficult, though it may come in handy later).
+
+```{r}
+# Mean of price in each of the neighborhood_groups
+mean_price_neighbourhood_group <- final_df_nyc %>%
+  group_by(neighbourhood_group) %>%
+  summarise(mean_price = mean(price, na.rm = TRUE))
+mean_price_neighbourhood_group
+```
+
+Although the differences are quite notable, we can check for statistical significance for the differences between the different neighborhood areas using ANOVA. But first, we should check for ANOVA assumption (independence of observations, normality, homogeneity of variance).
+
+```{r, warning=FALSE, message=FALSE}
+# checking for ANOVA assumptions
+# 1- independence of observations: from the information about this data set, we can probably safely say that this assumption is met
+
+# 2- Test for Normality
+# This is a large data set, and often normality is assumed by default
+# Q-Q plot of the residuals
+anova_model <- aov(price ~ neighbourhood_group, data = final_df_nyc)
+qqnorm(residuals(anova_model))
+qqline(residuals(anova_model), col = "steelblue")
+# checking normality after transforming the data further by taking the logof price to reduce extreme values
+anova_model2 <- aov(log_price ~ neighbourhood_group, data = final_df_nyc)
+qqnorm(residuals(anova_model2))
+qqline(residuals(anova_model2), col = "steelblue")
+
+# 3- Homogeneity of Variances
+library(car)
+levene_test <- leveneTest(price ~ neighbourhood_group, data = final_df_nyc)
+levene_test
+```
+
+The Q_Q plot for normality showed extreme values (outliers), which suggests that we should further transform the data a little more to reduce the skewness and outliers. The other option would be to not use parametric methods such as ANOVA, rather use a non-parametric test that does not assume normality (such as Kruskal-Wallis test).
+
+Let's stay with ANOVA and transform the data a little further to reduce the outliers (step added to the end of the data transformation above). And after checking the Normal Q-Q plot after this step, I see that the skewness of the data has improved a lot!
+
+So we carry on with ANOVA:
+
+```{r}
+# running ANOVA
+anova_result2 <- aov(log_price ~ neighbourhood_group, data = final_df_nyc)
+summary(anova_result2)
+
+# if the ANOVA is significant, proceed with Tukey's HSD post-hoc test
+if (summary(anova_result2)[[1]][["Pr(>F)"]][1] < 0.05) {
+  tukey_result <- TukeyHSD(anova_result2)
+  print(tukey_result)
+} else {
+  print("No significant difference detected by ANOVA.")
+}
+```
+The conclusion here is that the best NYC area that allows the renting of an entire house/apartment for the lowest amount of money is Bronx, followed by (by order): Queens, Staten Island, Brooklyn, and Manhattan. The difference between them is statistically significant.Interestingly though, after taking the log of the price, it seems that Staten Island came second rather than third.
+
+**Visualizations.**
+NOTE: The following code chunk includes some data transformations along with each plotting snippet.
+
+```{r}
+# bar chart of mean prices
+final_df_nyc <- final_df_nyc %>%
+  group_by(neighbourhood_group) %>%
+  mutate(mean_price = mean(price, na.rm = TRUE)) %>%
+  ungroup()
+ggplot(final_df_nyc, aes(x = neighbourhood_group, y = mean_price, fill = neighbourhood_group)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  labs(x = "Neighbourhood Group", y = "Mean Price", title = "Mean Prices by Neighbourhood Group") +
+  theme_minimal()
+
+
+# bar chart of median prices (less prone to extreme values)
+final_df_nyc <- final_df_nyc %>%
+  group_by(neighbourhood_group) %>%
+  mutate(median_price = median(price, na.rm = TRUE)) %>%
+  ungroup()
+ggplot(final_df_nyc, aes(x = neighbourhood_group, y = median_price, fill = neighbourhood_group)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  labs(x = "Neighbourhood Group", y = "Median Price", title = "Median Prices by Neighbourhood Group") +
+  theme_minimal()
+
+# bar chart of mean log_prices
+final_df_nyc <- final_df_nyc %>%
+  group_by(neighbourhood_group) %>%
+  mutate(mean_logprice = mean(log_price, na.rm = TRUE)) %>%
+  ungroup()
+ggplot(final_df_nyc, aes(x = neighbourhood_group, y = mean_logprice, fill = neighbourhood_group)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  labs(x = "Neighbourhood Group", y = "Mean Log_Price", title = "Mean Log_Prices by Neighbourhood Group") +
+  theme_minimal()
+
+# box plot of prices
+ggplot(final_df_nyc, aes(x = neighbourhood_group, y = price, fill = neighbourhood_group)) +
+  geom_boxplot() +
+  labs(x = "Neighbourhood Group", y = "Price", title = "Price Distribution by Neighbourhood Group") +
+  theme_minimal()
+
+# box plot of log_prices
+ggplot(final_df_nyc, aes(x = neighbourhood_group, y = log_price, fill = neighbourhood_group)) +
+  geom_boxplot() +
+  labs(x = "Neighbourhood Group", y = "Price", title = "Price Distribution by Neighbourhood Group") +
+  theme_minimal()
+```
+
+
+
+==========================================================================
+
+The box plot of the prices shows clearly how the outliers were detrimental to be able to use the data and look at it. On the other hand, the box plot of the log-Prices was much better!
+
+# dataset#3 Laptop Specs Data Set.
+
+Let's load the data:
+```{r}
+df_laptop <- read.csv("https://raw.githubusercontent.com/unsecuredAMRAP/607/main/laptopData.csv")
+```
+
+
+**Transformations.**
+
+I see a lot of issue with this data set, including:
+
+- missing values and cells that only contain "?"
+- rows empty
+- two ways of coding Mac Os and Windows 10
+
+So, let's get to work:
+
+```{r}
+# Convert empty strings to NA and then remove rows with only NA
+df_laptop <- df_laptop %>%
+  mutate_if(is.character, ~na_if(., "")) %>%
+  na.omit()
+
+# OpSys
+df_laptop <- df_laptop %>% 
+  mutate(OpSys = case_when(
+    OpSys == "Mac OS X" ~ "macOS",
+    OpSys == "Windows 10 S" ~ "Windows 10",
+    TRUE ~ OpSys
+  ))
+
+# cells with "?" in any column
+df_laptop <- df_laptop %>% mutate_all(~ifelse(. == "?", NA, .)) %>% na.omit()
+```
+
+Also, looking at where this data came from, I found out that the owner of it is based in Pakistan. The prices certainly do not seem to be USD at all. So, the likely scenario is that this is in the Pakistani currency (PKR). So I have converted the prices to USD below by dividing by  266.67 (which was the value of 1 USD back in 2018, rather than using today's conversion rate):
+
+```{r}
+df_laptop$Price <- df_laptop$Price / 121.57
+```
+
+
+```{r, eval=FALSE, echo=FALSE}
+# Save the somewhat cleaner data set:
+file_path <- "C:/Users/user/OneDrive - UTHealth Houston/_CUNY SPS MSDS/607/Week 5/W5 Discussion/week6_homework_otherDBs/Laptop_DB_archive/cleaner_df_laptop.csv"
+
+write.csv(df_laptop, file_path, row.names = FALSE)
+```
+
+
+**Analysis**
+
+Taking a look at the prices of the laptops in the data set
+
+```{r}
+summary(df_laptop$Price)
+
+ggplot(df_laptop, aes(y = Price)) + 
+  geom_boxplot() +
+  theme_minimal() +
+  labs(title = "Box Plot of Laptop Prices", y = "Price", x = "")
+
+ggplot(df_laptop, aes(x = Company, y = Price)) +
+  geom_jitter() +
+  scale_y_continuous(labels = scales::comma) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Laptop Prices by Company", x = "Company", y = "Price")
+```
+
+Calculating the mean of price for each company and seeing if they are statistically significant:
+
+```{r}
+mean_price_Company <- df_laptop %>%
+  group_by(Company) %>%
+  summarise(mean_price = mean(Price, na.rm = TRUE))
+mean_price_Company
+```
+
+```{r}
+# box plot of prices
+ggplot(df_laptop, aes(x = Company, y = Price, fill = Company)) +
+  geom_boxplot() +
+  labs(x = "Company", y = "Price", title = "Price Distribution by Company") +
+  theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+So now we can see that the most expensive laptops seem to be made by Razer.Though the most expensive laptops belonged to Razer and Lenovo, though these were outliers in this data set.
