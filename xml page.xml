@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<books>
+    <book>
+        <title>Thinking, Fast and Slow</title>
+        <author>Daniel Kahneman</author>
+        <firstReleaseYear>2011</firstReleaseYear>
+        <numberOfPages>499</numberOfPages>
+        <averageAmazonRating>4.6</averageAmazonRating>
+    </book>
+    <book>
+        <title>The Age of Surveillance Capitalism</title>
+        <author>Shoshana Zuboff</author>
+        <firstReleaseYear>2019</firstReleaseYear>
+        <numberOfPages>704</numberOfPages>
+        <averageAmazonRating>4.5</averageAmazonRating>
+    </book>
+    <book>
+        <title>Deep Medicine</title>
+        <author>Eric Topol</author>
+        <firstReleaseYear>2019</firstReleaseYear>
+        <numberOfPages>400</numberOfPages>
+        <averageAmazonRating>4.7</averageAmazonRating>
+    </book>
+</books>
